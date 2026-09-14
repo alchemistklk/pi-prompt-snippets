@@ -1,6 +1,6 @@
 {
   "name": "pi-prompt-snippets",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Mix, preview, and apply reusable prompt snippets in Pi.",
   "license": "MIT",
@@ -13,8 +13,8 @@
   "bugs": "https://github.com/alchemistklk/pi-prompt-snippets/issues",
   "files": ["index.ts", "snippets", "README.md", "LICENSE"],
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.85.0",
-    "@earendil-works/pi-tui": ">=0.85.0"
+    "@earendil-works/pi-coding-agent": ">=0.84.0",
+    "@earendil-works/pi-tui": ">=0.84.0"
   },
   "publishConfig": { "access": "public" },
   "pi": {
