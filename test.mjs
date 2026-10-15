@@ -1,10 +1,14 @@
 // No model calls or live-session interaction. Uses the installed Pi loader.
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = dirname(fileURLToPath(import.meta.url));
+mkdirSync(join(root, 'temp'), { recursive: true });
+const fixture = mkdtempSync(join(root, 'temp', 'config-test-'));
+process.env.PI_CODING_AGENT_DIR = join(fixture, 'agent');
+mkdirSync(process.env.PI_CODING_AGENT_DIR);
 const host = process.argv[2];
 assert.ok(host, 'Pass the installed pi-coding-agent package directory.');
 const { loadExtensions } = await import(pathToFileURL(join(host, 'dist/core/extensions/loader.js')).href);
@@ -22,7 +26,7 @@ assert.deepEqual(files, ['01-diagnosis.md', '02-delegate.md', '03-clarify.md', '
 // The menu is the single entry point: no prompt shortcut duplicates a snippet body.
 assert.ok(!existsSync(join(root, 'prompts')));
 assert.equal(JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).pi.prompts, undefined);
-const bodies = new Map(files.map(f => [f, readFileSync(join(root, 'snippets', f), 'utf8').split(/\n---\n/)[1].trim()]));
+const bodies = new Map(files.map(f => [f, readFileSync(join(root, 'snippets', f), 'utf8').split(/\r?\n---\r?\n/)[1].trim()]));
 // Filenames now follow menu order, so one list drives files, names, and navigation.
 const expectedNames = ['Diagnosis', 'Delegate', 'Clarify', 'Task Breakdown', 'Workflow', 'Handoff', 'Task Sync', 'Lark Sync', 'PR Sync', 'QA Sync', 'Browser'];
 const expectedCategories = ['development', 'development', 'advanced-development', 'advanced-development',
@@ -36,7 +40,7 @@ const selectKeys = (name, preview = false) => {
   return [...Array(index).fill('\x1b[B'), ' ', ...(preview ? ['\t', '\x1b'] : []), '\r'];
 };
 for (const [index, file] of files.entries()) {
-  const raw = readFileSync(join(root, 'snippets', file), 'utf8');
+  const raw = readFileSync(join(root, 'snippets', file), 'utf8').replace(/\r\n/g, '\n');
   assert.ok(raw.includes(`name: ${expectedNames[index]}\n`));
   assert.ok(raw.includes(`order: ${expectedOrders[index]}\n`));
   assert.ok(raw.includes('placement: prepend\n'));
@@ -178,6 +182,53 @@ for (const name of menuOrder) {
 ctx.mode = 'rpc';
 await menu();
 assert.equal(notifications.at(-1).text, 'Snippet menu requires interactive mode');
+
+// Config is optional, never created, and re-read when opening the menu.
+ctx.mode = 'tui';
+const configPath = join(process.env.PI_CODING_AGENT_DIR, 'pi-prompt-snippets.json');
+assert.equal(existsSync(configPath), false);
+const dirs = [join(fixture, 'one'), join(fixture, 'two')];
+for (const [i, dir] of dirs.entries()) {
+  mkdirSync(dir);
+  writeFileSync(join(dir, 'same.md'), `---\nname: Custom ${i}\n---\nCustom body ${i}`);
+}
+writeFileSync(configPath, JSON.stringify({ snippetDirectories: [...dirs, dirs[0]] }));
+keys = [' ', '\x1b[B', ' ', '\r'];
+await menu();
+assert.ok(renders.at(-1).includes('Custom 0'));
+assert.ok(renders.at(-1).includes('Custom 1'));
+const expanded = await input('Task');
+assert.ok(expanded.text.includes('Custom body 0'));
+assert.ok(expanded.text.includes('Custom body 1'));
+const child = join(dirs[0], 'child');
+const grandchild = join(child, 'grandchild');
+mkdirSync(grandchild, { recursive: true });
+writeFileSync(join(child, 'same.md'), '---\nname: Child snippet\n---\nChild body');
+writeFileSync(join(grandchild, 'deep.md'), '---\nname: Too deep\n---\nDeep body');
+writeFileSync(configPath, JSON.stringify({ snippetDirectories: [dirs[0], child] }));
+keys = ['\x1b'];
+const firstRender = renders.length;
+await menu();
+const recursiveMenu = renders[firstRender];
+assert.ok(recursiveMenu.includes('Custom 0'));
+assert.ok(recursiveMenu.includes('Child snippet'));
+assert.ok(recursiveMenu.includes('Too deep')); // Explicit child root includes its own children.
+assert.equal(recursiveMenu.match(/Child snippet/g)?.length, 1);
+writeFileSync(configPath, JSON.stringify({ snippetDirectories: [dirs[0]] }));
+const shallowRender = renders.length;
+await menu();
+assert.ok(renders[shallowRender].includes('Child snippet'));
+assert.ok(!renders[shallowRender].includes('Too deep'));
+writeFileSync(configPath, JSON.stringify({ snippetDirectories: [] }));
+await menu();
+assert.equal(notifications.at(-1).text, 'No prompt snippets are installed');
+for (const config of [{}, { snippetDirectories: ['relative'] }, { snippetDirectories: [42] }]) {
+  writeFileSync(configPath, JSON.stringify(config));
+  await assert.rejects(menu, /absolute directory paths/);
+}
+writeFileSync(configPath, '{');
+await assert.rejects(menu, SyntaxError);
+rmSync(fixture, { recursive: true });
 
 console.log(JSON.stringify({
   result: 'PASS', snippets: files.length, menuModes: expectedNames,

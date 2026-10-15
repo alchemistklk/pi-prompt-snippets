@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
@@ -40,7 +41,7 @@ function parseFrontmatter(id: string, source: string): Snippet | undefined {
 	const parsedOrder = Number.parseInt(fields.get("order") ?? "", 10);
 	return {
 		id,
-		name: fields.get("name") || id.replace(/\.md$/i, ""),
+		name: fields.get("name") || id.split(/[\\/]/).pop()!.replace(/\.md$/i, ""),
 		description: fields.get("description") ?? "",
 		category: fields.get("category") ?? "general",
 		order: Number.isFinite(parsedOrder) ? parsedOrder : 9999,
@@ -49,10 +50,35 @@ function parseFrontmatter(id: string, source: string): Snippet | undefined {
 	};
 }
 
+function snippetDirectories(): string[] {
+	const configPath = join(getAgentDir(), "pi-prompt-snippets.json");
+	let source: string;
+	try {
+		source = readFileSync(configPath, "utf8");
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [SNIPPETS_DIR];
+		throw error;
+	}
+	const config = JSON.parse(source);
+	if (!config || !Array.isArray(config.snippetDirectories) ||
+		!config.snippetDirectories.every((path: unknown) => typeof path === "string" && isAbsolute(path))) {
+		throw new Error(`${configPath}: snippetDirectories must be an array of absolute directory paths`);
+	}
+	return [...new Set<string>(config.snippetDirectories)];
+}
+
+function snippetFiles(directory: string, depth = 0): string[] {
+	return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+		const path = join(directory, entry.name);
+		if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) return [path];
+		if (entry.isDirectory() && depth === 0) return snippetFiles(path, depth + 1);
+		return [];
+	});
+}
+
 function readSnippets(): Snippet[] {
-	const entries = readdirSync(SNIPPETS_DIR, { withFileTypes: true })
-		.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".md"))
-		.map((entry) => parseFrontmatter(entry.name, readFileSync(join(SNIPPETS_DIR, entry.name), "utf8")))
+	const entries = [...new Set(snippetDirectories().flatMap((directory) => snippetFiles(directory)))]
+		.map((path) => parseFrontmatter(path, readFileSync(path, "utf8")))
 		.filter((entry): entry is Snippet => Boolean(entry));
 	const categories = [...new Set(entries.map((entry) => entry.category))];
 	const categoryRank = (category: string) => categories.indexOf(category);

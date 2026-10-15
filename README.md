@@ -42,6 +42,23 @@ Names, descriptions, and prompts are English. Response language follows the user
 
 Snippet definitions are Markdown files under `snippets/`. Filenames, `category`, and `order` control menu order. Edits load when the menu reopens; extension code changes require `/reload`.
 
+### Custom snippet directories
+
+Optionally create `<agent-dir>/pi-prompt-snippets.json`, where `<agent-dir>` is Pi's config directory (`~/.pi/agent` by default, overridden by `PI_CODING_AGENT_DIR`):
+
+```json
+{
+  "snippetDirectories": [
+    "/absolute/path/to/personal-snippets",
+    "/absolute/path/to/shared-snippets"
+  ]
+}
+```
+
+When present, this config replaces the bundled snippet directory. Each directory is scanned for Markdown files directly inside it and one subdirectory level below it. Deeper directories and symbolic links are not followed. Paths must be absolute; `~` and environment variables are not expanded. Duplicate directories and overlapping file paths are scanned once; matching filenames in different directories remain separate snippets. An empty array disables all snippets. Invalid config or unreadable directories report an error rather than falling back to bundled snippets.
+
+Without this file, bundled snippets work as before. The extension never creates or modifies the config. Keeping it in Pi's config directory preserves it across package updates. Changes load when the menu reopens.
+
 Keep outcome, completion criteria, and user-specific constraints in snippets; leave task-specific methods to the agent and consult skills for the guidance the task needs. Delegate and Workflow explicitly select async execution. Clarify ends when the decisions needed for the next step are resolved. Handoff targets the next session's focus and links existing artifacts. The snippet bodies are authoritative for execution details. Model, context and concurrency defaults belong in settings.
 
 The published package contains only the extension, its bundled snippets, documentation, and license. It performs no network requests or subprocess execution.
